@@ -38,3 +38,7 @@ const myValue = anUnknownFunction();
 // Thankfully, typescript can tell me what type myValue has.
 // But, does anUnknownFunction have side effects? Can I call this twice and expect the same result?
 // I can't tell without inspecting its source code.
+
+
+
+

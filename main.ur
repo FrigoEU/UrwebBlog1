@@ -24,7 +24,7 @@
 (* /home/simonvancasteren/ur-proj/blog/main.ur:18:4: (to 22:3) Stuck unifying these records after canceling matching pieces:
    Have:  ([FirstName = string]) ++ <UNIF:U48::{Type}>
    Need:  [UserName = string]
-(*  *\) *)
+*)
 
 (* fun main3 (): transaction page = *)
 (*     countSource <- source 0; *)
@@ -40,8 +40,12 @@
 (*     </xml> *)
 
 
-val anUnknownFunction (): transaction string = ...
+
+
+(* val anUnknownFunction (): transaction string = ... *)
 
 (* Does this function have side effects? *)
 (* Yes, its type says so, and the compiler enforces "bubbling" of side-effects *)
 (* In case a function doesn't contain a transaction type, I'm sure it's pure and calling it with the same arguments will give me the same value every time *)
+
+
