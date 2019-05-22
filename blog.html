@@ -1,0 +1,167 @@
+I’ve spent the last 1.5 years parttime building www.classy.school (currently only available in Dutch). It’s a SaaS application built for music schools. I’m very happy with it and plan to work on it for much longer.
+
+I built this application in a programming language that almost noone knows. That language is called Ur/Web and it’s a shame it’s so unknown, because to me it’s both amazing and wildly practical. In this post I’ll talk about all the features I love in Ur/Web, some painpoints you’ll encounter, and maybe my journey towards it, if it’s interesting enough.
+
+Before we begin, I’ll give a short introduction. Ur/Web is a purely functional, statically typed programming language designed specifically for making web applications. It’s created by Adam Chlipala, Associate Professor of Computer Science at MIT.
+Pure: Functions can not have side-effects unless tagged as such. If you’re familiar with Haskell, this corresponds to the “IO” type. Ur/Web uses the “transaction” type, which signals a function as impure but also gives it “transactional semantics”.
+Functional: Functions are your basic building blocks. No objects, classes or inheritance in the OO sense.
+Statically typed: The type system will be familiar to Haskell or ML programmers, but contains some incredible additions, mainly in its support for records (think PureScript records but more compiler support).
+Designed for web applications: An Ur/Web program always compiles to a web server. You can’t make command line applications with it, nor native GUI applications. You write your code for the three tiers (frontend, backend, database) in the same language. The compiler determines what it needs to compile to JavaScript for frontend use, C for backend use, or SQL for database access. Two FFI’s are available: one for JavaScript code, one for C code.
+
+
+<h1>Great Ur/Web features</h1>
+
+<div>
+    I’ll try and give a motivating example for every feature I list. I’ll do this in a minimal amount of lines of TypeScript, since it’s the mainstream programming language I am most familiar with.
+</div>
+
+<section>
+
+    <h2>Type-safe client-server communication</h2>
+
+    <code>
+// server.ts
+import * as express from "express";
+let app = express();
+
+app.get("/users", (req, res) => {
+    res.send({id: 1, userName: “Simon”});
+});
+
+// client.ts
+fetch(“/users”).then(users => users.forEach(u => console.log(u.firstName)));
+
+// prints undefined, the property is called userName
+    </code>
+
+    <p>
+        Keeping frontend and backend code is pretty hard. Often the data model that is being used on the backend somehow deviates from what’s used in frontend code, for a variety of reasons. It’s been a drag on every relatively big project I’ve worked on. There are many improvements for this. In most mainstream languages, you rely either on code generation or IDE functionality. There area serious downsides to this. To me, the most important one is that the methods that I know of don’t have support for vital data structures. Tagged unions, option types, dates (with and without timezones), times, etc etc are often not supported, or not support well, in many cases.
+    </p>
+
+    <code>
+-- users.ur
+fun getUsers () = return ({Id = 1, UserName = "Simon"} :: [])
+
+fun main (): transaction page = return <xml>
+        <body>
+            <button onclick={fn _ => users <- rpc (getUsers ()); 
+                              List.mapM (fn u => debug u.FirstName) users}/>
+        </body>
+</xml>
+
+(* /home/simonvancasteren/ur-proj/blog/main.ur:6:29: (to 6:100) Stuck unifying these records after canceling matching pieces:
+   Have:  ([FirstName = string]) ++ <UNIF:U98::{Type}>
+    Need:  [Id = int, UserName = string]
+    *)
+    </code>
+
+    <p>
+        Ur/Web frontend and backend code is always in sync. You use one codebase for all your tiers and the typechecker makes sure everything lines up. Marshalling of values is done by the compiler. You can’t define your own marshalling. I was used to writing serializers and deserializers in PureScript, but I’ve come to appreciate what Ur/Web does. So far I’ve not had any problems with marshalling between frontend and backend code.
+    </p>
+</section>
+
+<section>
+    <h2>Embedded sql</h2>
+    <code>
+const pgp = require('pg-promise')();
+const db = pgp('postgres://postgres@localhost:5432/blog');
+
+let q = 'select userName from users'
+db.each(q, [], users => users.forEach(u => console.log(u.firstName));
+);
+// prints undefined, the property is called userName
+    </code>
+
+    <p>
+        When interacting with databases, the same kind of synchronization problems tend to occur. The database schema is somehow not in sync with the application code. Some mainstream languages try to solve this with typed ORM's or IDE functionality. Visual Studio works pretty well in this regard.
+    </p>
+
+    <code>
+table users: { Id: int
+            , UserName: string
+            }
+fun main2 (): transaction page =
+    users <- queryL1 (SELECT users.UserName
+                    FROM users);
+    _ <- List.mapM (fn u => debug u.FirstName) users;
+return <xml></xml>
+
+(* /home/simonvancasteren/ur-proj/blog/main.ur:18:4: (to 22:3) Stuck unifying these records after canceling matching pieces:
+    Have:  ([FirstName = string]) ++ <UNIF:U48::{Type}>
+        Need:  [UserName = string]
+        *)
+    </code>
+    <p>
+        In Ur/Web, you define tables with the "table" keyword. You then write embedded SQL code to query (or insert/update) these tables. Table definitions get output as a .sql file containing CREATE TABLE... statements. The embedded SQL code gets executed in your DB (currently supports sqlite, mysql and postgresql). I say embedded SQL becuase the compiler parses this syntax and translates into it's own AST. This allows it to do typechecking and avoid SQL injection. The type system level encoding of SQL in UrWeb is awesome. It has support for pretty much everything I need in my day to day programming. Among others: INNER JOIN, OUTER JOIN, UNION, GROUP BY, ORDER BY, window functions, etc. All VERY strictly typed.
+    </p>
+    <p>
+        Ur/Web takes care of marshalling base datatypes in and out of SQL and allows embedding non-base types (like tagged unions) with the use of the serialize keyword. This explicit serialization can get annoying. Also, some types are not supported (like the various date and time types of PostgreSQL) and using them means adding them to the compiler. I've managed without this, but a good solution for this would be great.
+    </p>
+</section>
+<section id="htmlgen">
+    <h2>HMTL generation and the frontend framework</h2>
+    <code>
+fun main3 (): transaction page =
+    countSource <- source 0;
+    return <xml>
+        <body>
+            <span>Hello world</span>
+            <dyn signal={count <- signal countSource;
+                        return <xml> {[count]} </xml>}/>
+            <button onclick={fn _ => count <- get countSource; set countSource (count + 1)}>
+                Add to counter
+            </button>
+        </body>
+    </xml>
+    </code>
+    <p>
+        Two things here I want to mention. First of all, you tag dynamic parts of your page with the "dyn" (or "active") tags. This allows Ur/Web to do server-side rendering for everything else. The "Hello world" span will be sent as HTML to the client, so no JavaScript rendering for that part. The "dyn" tag will not be server-side rendered, but rather rendered using JavaScript as the content of this tag can change during the lifecycle of the page. This is great for a few reasons, but I like it mostly for performance. Ur/Web's server side is insanely fast. And client-side rendering code only needs to rerender limited parts of the page.
+    </p>
+    <p>
+        Second thing I want to mention here is the frontend "framework". It works <em>extremely</em> well. I'm mostly a frontend programmer and have experience in just about every single JavaScript frontend of the last 10 years. I am more productive with this than with any alternative I've tried. It's very simple for small dynamic things and can scale up to really high complexity. In the more complex cases I often use an "Elm Architecture" approach, which is easily implemented on top of the sources and signals of Ur/Web's frontend framework.
+    </p>
+</section>
+<section>
+    <h2>Performance</h2>
+    <p>
+        No code here, just me talking about two things. First of all, server-side performance is amazing. Urweb has been doing really well on <a href="https://www.techempower.com/benchmarks/#section=data-r16&hw=ph&test=fortune">Techempower's benchmarks up until round 16</a>, at which point something broke, not sure what. Other languages that focus on functional programming, correctness, etc often incur a performance penalty. Ur/Web definitely breaks the trend here: its performance is at the top of the charts.
+    </p>
+    <p>
+        Secondly, client-side performance is also very good. In terms of code generation, the generated code size seems large at first. My bundle ends up at around 1.7MB of javascript. However, after brotli level 4 compression it ends up at around 140kB, and level 11 compression even brings it down to 90kB. This is extremely small for the amount of logic that is being shipped (no code splitting or lazy loading is being done) and is mostly thanks to the way that Ur/Web frontend code is encoded into a special format. Parsing is also very fast because a lot of code is shipped as strings and eval'd later.
+    </p>
+    <p>
+        Frontend runtime performance has not been an issue for me at all, but I haven't done any extensive benchmarks, simply because I've not felt any kind of slowdown at all in client-side rendering speed. Not having to rerender the whole page (as explained in <a href="#htmlgen">this section</a>) definitely helps a lot, as does the source/signal architecture.
+    </p>
+</section>
+<section>
+    <h2>Purity</h2>
+    <code>
+// server.ts
+const myValue = anUnknownFunction();
+
+// Thankfully, typescript can tell me what type myValue has.
+// But, does anUnknownFunction have side effects? Can I call this twice and expect the same result?
+// I can't tell without inspecting its source code.
+    </code>
+    <p>
+        Knowing whether or not a function causes side effects is very imporant information, on par with its type and its name. Very few languages support this kind of "impure" tagging today. Only the Haskell family of languages does so and it's something I miss every day when writing TypeScript. There is no real substitute for this in mainstream languages. The only thing you can do is tag impure functions yourself, but without compiler support, this is a losing battle (I know from experience).
+    </p>
+    <code>
+val anUnknownFunction (): transaction string = ...
+
+(* Does this function have side effects? *)
+(* Yes, its type says so, and the compiler enforces "bubbling" of side-effects *)
+(* In case a function doesn't contain a transaction type, I'm sure it's pure and calling it with the same arguments will give me the same value every time *)
+    </code>
+    <p>
+        Luckily, Ur/Web does have a compiler-enforced side-effect type in the form of the transaction type. Not much to say about it, apart from the fact that it completely changes how I write programs, in the best way possible.
+    </p>
+</section>
+<section>
+    <h2>Documentation</h2>
+</section>
+
+Modules + tables
+Modules + pages
+
+
